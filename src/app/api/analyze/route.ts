@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import OpenAI from "openai";
+import type { ChatCompletionUserMessageParam } from "openai/resources/chat/completions";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -37,23 +38,6 @@ function pickDrills(improvements: string[]): string[] {
   return drills.slice(0, 3).length > 0 ? drills.slice(0, 3) : ["1", "2", "4"];
 }
 
-async function extractFramesFromVideo(videoBuffer: Buffer): Promise<string[]> {
-  // We'll use a URL-safe base64 approach — split the video into a few representative
-  // frames using the first ~20% of bytes (launch position) and ~50% (contact zone)
-  // Since we're on Vercel (no ffmpeg), we send 3 key moments of the raw video to GPT-4o
-  // which can analyze video clips directly via base64 in the messages API.
-  const base64Video = videoBuffer.toString("base64");
-
-  // Split into 3 segments for analysis (first third, middle, last third)
-  const segmentSize = Math.floor(videoBuffer.length / 3);
-  const segments = [
-    videoBuffer.slice(0, segmentSize).toString("base64"),
-    videoBuffer.slice(segmentSize, segmentSize * 2).toString("base64"),
-    videoBuffer.slice(segmentSize * 2).toString("base64"),
-  ];
-
-  return [base64Video]; // Return full video for GPT-4o analysis
-}
 
 async function analyzeSwingWithAI(
   videoBase64: string,
@@ -90,23 +74,23 @@ Respond with ONLY valid JSON in this exact format (no markdown, no code fences):
 Be specific to what you actually see — not generic advice. If you cannot clearly see the mechanics due to video quality or angle, note that in the improvements but still provide your best assessment based on what is visible.`;
 
   try {
+    const userMessage: ChatCompletionUserMessageParam = {
+      role: "user",
+      content: [
+        {
+          type: "image_url",
+          image_url: {
+            url: `data:${mimeType};base64,${videoBase64}`,
+            detail: "high",
+          },
+        },
+        { type: "text", text: prompt },
+      ],
+    };
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${mimeType};base64,${videoBase64}`,
-                detail: "high",
-              },
-            } as { type: "image_url"; image_url: { url: string; detail: string } },
-            { type: "text", text: prompt },
-          ],
-        },
-      ],
+      messages: [userMessage],
       max_tokens: 600,
     });
 
