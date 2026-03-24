@@ -39,22 +39,15 @@ export async function POST(request: NextRequest) {
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://nextsport.vercel.app";
 
+    const priceId = process.env.STRIPE_PREMIUM_PRICE_ID!;
+
     // Create checkout session
-    // Note: You need to create a Stripe price for $14.99/mo and set STRIPE_PREMIUM_PRICE_ID
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ["card"],
       line_items: [
         {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: "NextSport Premium",
-              description: "200 tokens/week, unlimited analyses, full dashboard",
-            },
-            unit_amount: 1499, // $14.99
-            recurring: { interval: "month" },
-          },
+          price: priceId,
           quantity: 1,
         },
       ],

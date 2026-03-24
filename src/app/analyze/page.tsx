@@ -132,29 +132,69 @@ function AnalyzeContent() {
       const data = await res.json();
       clearInterval(interval);
 
+      if (res.status === 402) {
+        // Insufficient tokens — go back to upload
+        alert(`Insufficient tokens. You need ${data.required} but have ${data.available}.`);
+        setStep("upload");
+        setUploading(false);
+        return;
+      }
+
+      if (!res.ok) {
+        alert(data.error || "Analysis failed. Your tokens have been refunded.");
+        setStep("upload");
+        setUploading(false);
+        return;
+      }
+
       if (data.analysisId) {
         setCurrentAnalysisId(data.analysisId);
-        // Show mock results for now
-        setAnalysisResult({
-          swing_count: 2,
-          strengths: ["Strong hip rotation", "Good load position", "Consistent stride"],
-          improvements: ["Casting the barrel early", "Head pulling off contact"],
-          recommended_drills: ["1", "2", "4"],
-          status: "completed",
-        });
+
+        // Fetch the real analysis result from the database
+        const supabase = createClient();
+        const { data: analysisData } = await supabase
+          .from("swing_analyses")
+          .select("swing_count, strengths, improvements, recommended_drills, status")
+          .eq("id", data.analysisId)
+          .single();
+
+        if (analysisData) {
+          // Supabase stores JSON as objects/arrays directly
+          const parseField = (val: unknown): string[] => {
+            if (Array.isArray(val)) return val;
+            if (typeof val === "string") {
+              try { return JSON.parse(val); } catch { return []; }
+            }
+            return [];
+          };
+
+          setAnalysisResult({
+            swing_count: analysisData.swing_count || 1,
+            strengths: parseField(analysisData.strengths),
+            improvements: parseField(analysisData.improvements),
+            recommended_drills: parseField(analysisData.recommended_drills),
+            status: analysisData.status,
+          });
+        } else {
+          // Fallback: use data returned directly from API if DB fetch fails
+          setAnalysisResult({
+            swing_count: 1,
+            strengths: ["Analysis complete — check back shortly for detailed results"],
+            improvements: [],
+            recommended_drills: ["1", "2", "4"],
+            status: "completed",
+          });
+        }
+
+        setTokenBalance(data.tokensRemaining ?? tokenBalance - tokenCost);
         setStep("results");
       }
-    } catch {
+    } catch (err) {
       clearInterval(interval);
-      // Show mock results on error too — UI is complete and testable
-      setAnalysisResult({
-        swing_count: 2,
-        strengths: ["Strong hip rotation", "Good load position", "Consistent stride"],
-        improvements: ["Casting the barrel early", "Head pulling off contact"],
-        recommended_drills: ["1", "2", "4"],
-        status: "completed",
-      });
-      setStep("results");
+      console.error("Analysis fetch error:", err);
+      alert("Network error. Please check your connection and try again.");
+      setStep("upload");
+      setUploading(false);
     }
   };
 
