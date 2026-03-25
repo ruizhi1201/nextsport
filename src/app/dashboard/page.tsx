@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
+import { Suspense } from "react";
 import BottomNav from "@/components/BottomNav";
 import TokenBadge from "@/components/TokenBadge";
 import { createClient } from "@/lib/supabase/client";
@@ -20,12 +22,27 @@ interface Analysis {
   duration_seconds: number | null;
 }
 
-export default function DashboardPage() {
+function DashboardContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const upgraded = searchParams.get("upgraded") === "true";
+
   const [profile, setProfile] = useState<Profile | null>(null);
   const [tokenBalance, setTokenBalance] = useState(10);
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [loading, setLoading] = useState(true);
   const [userEmail, setUserEmail] = useState("");
+  const [showUpgradeToast, setShowUpgradeToast] = useState(upgraded);
+
+  useEffect(() => {
+    if (upgraded) {
+      // Clean URL without refreshing
+      router.replace("/dashboard", { scroll: false });
+      // Auto-dismiss toast after 5s
+      const timer = setTimeout(() => setShowUpgradeToast(false), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [upgraded, router]);
 
   useEffect(() => {
     const load = async () => {
@@ -64,6 +81,31 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen pb-24" style={{ background: "#0A0F1E" }}>
+      {/* Upgrade success toast */}
+      {showUpgradeToast && (
+        <div
+          className="fixed top-4 left-1/2 z-50 px-5 py-3 rounded-2xl flex items-center gap-3 shadow-xl"
+          style={{
+            background: "#1c1405",
+            border: "2px solid #F59E0B",
+            transform: "translateX(-50%)",
+            maxWidth: "calc(100vw - 2rem)",
+          }}
+        >
+          <span className="text-2xl">⚡</span>
+          <div>
+            <p className="text-white font-black text-sm">Welcome to Premium!</p>
+            <p className="text-gray-400 text-xs">200 tokens added to your account</p>
+          </div>
+          <button
+            onClick={() => setShowUpgradeToast(false)}
+            className="text-gray-500 text-lg ml-2 hover:text-white"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Top Bar */}
       <div className="sticky top-0 z-40 px-4 py-3 flex items-center justify-between" style={{ background: "#0A0F1E", borderBottom: "1px solid #1f2937" }}>
         <div className="flex items-center gap-2">
@@ -194,5 +236,20 @@ export default function DashboardPage() {
 
       <BottomNav />
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#0A0F1E" }}>
+        <div className="text-center">
+          <div className="text-4xl mb-3 animate-bounce">⚾</div>
+          <p className="text-gray-400 text-sm">Loading your dashboard...</p>
+        </div>
+      </div>
+    }>
+      <DashboardContent />
+    </Suspense>
   );
 }

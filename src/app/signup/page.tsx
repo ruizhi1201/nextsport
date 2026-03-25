@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-export default function SignupPage() {
+function SignupContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const refCode = searchParams.get("ref") || "";
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -19,31 +22,63 @@ export default function SignupPage() {
     setError("");
 
     const supabase = createClient();
-    const { error } = await supabase.auth.signUp({
+    const { data: authData, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
       options: {
         emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback`,
+        data: { referral_code: refCode || undefined },
       },
     });
 
-    if (error) {
-      setError(error.message);
+    if (signUpError) {
+      setError(signUpError.message);
       setLoading(false);
-    } else {
-      setSuccess(true);
-      setLoading(false);
-      // If email confirmation is disabled, redirect immediately
-      setTimeout(() => router.push("/onboarding"), 1000);
+      return;
     }
+
+    // If we have a referral code, record it after signup
+    if (refCode && authData.user) {
+      // Look up the referrer by code
+      const { data: referrer } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("referral_code", refCode)
+        .single();
+
+      if (referrer && referrer.id !== authData.user.id) {
+        // Update the new user's profile with referred_by
+        await supabase
+          .from("profiles")
+          .update({ referred_by: referrer.id })
+          .eq("id", authData.user.id);
+
+        // Create a pending referral record
+        await supabase.from("referrals").insert({
+          referrer_id: referrer.id,
+          referred_id: authData.user.id,
+          status: "pending",
+          reward_issued: false,
+        });
+      }
+    }
+
+    setSuccess(true);
+    setLoading(false);
+    // If email confirmation is disabled, redirect immediately
+    setTimeout(() => router.push(refCode ? `/onboarding?ref=${refCode}` : "/onboarding"), 1000);
   };
 
   const handleGoogleSignup = async () => {
     const supabase = createClient();
+    // Store ref code in localStorage so we can process after OAuth redirect
+    if (refCode) {
+      localStorage.setItem("nextsport_ref", refCode);
+    }
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback?next=/onboarding`,
+        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback?next=/onboarding${refCode ? `&ref=${refCode}` : ""}`,
       },
     });
   };
@@ -71,6 +106,20 @@ export default function SignupPage() {
           </Link>
           <p className="text-gray-400 text-sm mt-2">Create your free account</p>
         </div>
+
+        {/* Referral banner */}
+        {refCode && (
+          <div
+            className="p-3 rounded-2xl flex items-center gap-3 mb-5"
+            style={{ background: "#0c1a2e", border: "1px solid #1d4ed8" }}
+          >
+            <span className="text-2xl">🎁</span>
+            <div>
+              <p className="text-white text-sm font-bold">You were referred!</p>
+              <p className="text-gray-400 text-xs">Sign up and your friend earns 30 bonus tokens</p>
+            </div>
+          </div>
+        )}
 
         {/* Google Button */}
         <button
@@ -153,5 +202,17 @@ export default function SignupPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#0A0F1E" }}>
+        <div className="text-4xl animate-bounce">⚾</div>
+      </div>
+    }>
+      <SignupContent />
+    </Suspense>
   );
 }
