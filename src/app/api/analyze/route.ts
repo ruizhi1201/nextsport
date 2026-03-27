@@ -203,6 +203,8 @@ Generate a coaching report. Respond with ONLY valid JSON:
   };
 }
 
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createMobileClient();
