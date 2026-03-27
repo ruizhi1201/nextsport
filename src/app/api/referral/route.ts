@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createMobileClient } from "@/lib/supabase/server";
+import { createMobileClient, createServiceClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
   const supabase = await createMobileClient();
@@ -9,19 +9,29 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { data: profile, error } = await supabase
+  const serviceClient = await createServiceClient();
+
+  // Get referral code from profiles
+  const { data: profile, error: profileError } = await serviceClient
     .from("profiles")
-    .select("referral_code, referral_count")
+    .select("referral_code")
     .eq("id", user.id)
     .single();
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (profileError) {
+    return NextResponse.json({ error: profileError.message }, { status: 500 });
   }
+
+  // Count how many users were referred by this user
+  const { count, error: countError } = await serviceClient
+    .from("profiles")
+    .select("id", { count: "exact", head: true })
+    .eq("referred_by", profile?.referral_code ?? "");
 
   return NextResponse.json({
     referral_code: profile?.referral_code ?? null,
-    referral_count: profile?.referral_count ?? 0,
+    referral_count: count ?? 0,
+    referred_count: count ?? 0,
     referral_link: `https://nextsport.vercel.app/signup?ref=${profile?.referral_code ?? ""}`,
   });
 }
