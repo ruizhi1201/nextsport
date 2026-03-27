@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createMobileClient, createServiceClient } from "@/lib/supabase/server";
 import OpenAI from "openai";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -205,7 +205,7 @@ Generate a coaching report. Respond with ONLY valid JSON:
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const supabase = await createMobileClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
