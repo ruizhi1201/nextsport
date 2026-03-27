@@ -53,38 +53,12 @@ async function analyzeSwingWithAI(
   // Many MP4s contain embedded JPEG thumbnails we can extract for vision analysis.
   // Fall through to intelligent text analysis if no JPEG frames found.
 
+  // Frame extraction skipped — mobile uploads are raw video buffers without extractable JPEG frames.
+  // Text-based AI analysis is reliable and personalized.
   const frames: string[] = [];
 
-  try {
-    // Scan for JPEG SOI markers in video buffer
-    let i = 0;
-    while (i < videoBuffer.length - 1 && frames.length < 3) {
-      if (videoBuffer[i] === 0xFF && (videoBuffer[i + 1] === 0xD8)) {
-        // Found JPEG start — find the end marker FFD9
-        let j = i + 2;
-        while (j < videoBuffer.length - 1) {
-          if (videoBuffer[j] === 0xFF && videoBuffer[j + 1] === 0xD9) {
-            // Found JPEG end
-            const frameData = videoBuffer.slice(i, j + 2);
-            if (frameData.length > 5000) { // Skip tiny thumbnails
-              frames.push(frameData.toString("base64"));
-            }
-            i = j + 2;
-            break;
-          }
-          j++;
-        }
-        if (j >= videoBuffer.length - 1) break;
-      } else {
-        i++;
-      }
-    }
-  } catch {
-    // Frame extraction failed — continue to text analysis
-  }
-
   if (frames.length > 0) {
-    // We have real frames — use GPT-4o vision
+    // Vision path (not used for mobile uploads)
     const prompt = `You are an expert baseball hitting coach analyzing swing frames from a video.
 The video is ${durationSeconds} seconds long.
 
@@ -307,7 +281,7 @@ export async function POST(request: NextRequest) {
         .update({ status: "failed" })
         .eq("id", analysis.id);
 
-      const errMsg = aiErr instanceof Error ? aiErr.message : String(aiErr); return NextResponse.json({ error: "Analysis failed — tokens refunded", debug: errMsg }, { status: 500 });
+      return NextResponse.json({ error: "Analysis failed — tokens refunded" }, { status: 500 });
     }
 
     // Save results
