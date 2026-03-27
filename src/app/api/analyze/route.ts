@@ -307,7 +307,7 @@ export async function POST(request: NextRequest) {
         .update({ status: "failed" })
         .eq("id", analysis.id);
 
-      return NextResponse.json({ error: "Analysis failed — tokens refunded" }, { status: 500 });
+      const errMsg = aiErr instanceof Error ? aiErr.message : String(aiErr); return NextResponse.json({ error: "Analysis failed — tokens refunded", debug: errMsg }, { status: 500 });
     }
 
     // Save results
