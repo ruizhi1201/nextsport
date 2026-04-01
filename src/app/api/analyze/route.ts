@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { createMobileClient, createServiceClient } from "@/lib/supabase/server";
 import OpenAI from "openai";
 
@@ -257,7 +258,7 @@ export async function POST(request: NextRequest) {
     // Run AI analysis
     let aiResult: SwingAnalysisResult;
     try {
-      const serviceClientForDownload = await createServiceClient();
+      const serviceClientForDownload = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
       const { data: videoBlob, error: downloadErr } = await serviceClientForDownload.storage
         .from("swing-videos")
         .download(videoPath);
