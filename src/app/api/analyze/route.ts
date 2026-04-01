@@ -190,12 +190,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const formData = await request.formData();
-    const video = formData.get("video") as File | null;
-    const durationStr = formData.get("duration") as string | null;
-    const duration = durationStr ? parseInt(durationStr) : 0;
+    const body = await request.json();
+    const videoPath = body.videoPath as string | undefined;
+    const duration = body.duration ? parseInt(body.duration) : 15;
 
-    if (!video) {
+    if (!videoPath) {
       return NextResponse.json({ error: "No video provided" }, { status: 400 });
     }
 
@@ -258,8 +257,18 @@ export async function POST(request: NextRequest) {
     // Run AI analysis
     let aiResult: SwingAnalysisResult;
     try {
-      const videoBuffer = Buffer.from(await video.arrayBuffer());
-      aiResult = await analyzeSwingWithAI(videoBuffer, video.type || "video/mp4", duration);
+      const serviceClientForDownload = await createServiceClient();
+      const { data: videoBlob, error: downloadErr } = await serviceClientForDownload.storage
+        .from("swing-videos")
+        .download(videoPath);
+      if (downloadErr || !videoBlob) {
+        return NextResponse.json({ error: "Could not load video" }, { status: 400 });
+      }
+      const videoBuffer = Buffer.from(await videoBlob.arrayBuffer());
+      aiResult = await analyzeSwingWithAI(videoBuffer, "video/mp4", duration);
+
+      // Clean up video from storage after download
+      await serviceClientForDownload.storage.from("swing-videos").remove([videoPath]);
     } catch (aiErr) {
       console.error("AI analysis error:", aiErr);
 
