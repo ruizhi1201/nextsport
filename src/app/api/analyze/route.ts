@@ -257,6 +257,7 @@ export async function POST(request: NextRequest) {
 
     // Run AI analysis
     let aiResult: SwingAnalysisResult;
+    let videoBuffer: Buffer | null = null;
     try {
       const serviceClientForDownload = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
       const { data: videoBlob, error: downloadErr } = await serviceClientForDownload.storage
@@ -265,10 +266,10 @@ export async function POST(request: NextRequest) {
       if (downloadErr || !videoBlob) {
         return NextResponse.json({ error: "Could not load video" }, { status: 400 });
       }
-      const videoBuffer = Buffer.from(await videoBlob.arrayBuffer());
+      videoBuffer = Buffer.from(await videoBlob.arrayBuffer());
       aiResult = await analyzeSwingWithAI(videoBuffer, "video/mp4", duration);
 
-      // Clean up video from storage after download
+      // Clean up original video from storage after download
       await serviceClientForDownload.storage.from("swing-videos").remove([videoPath]);
     } catch (aiErr) {
       console.error("AI analysis error:", aiErr);
@@ -307,11 +308,74 @@ export async function POST(request: NextRequest) {
       })
       .eq("id", analysis.id);
 
+    // Generate slow-motion annotated video using ffmpeg
+    let resultVideoUrl: string | null = null;
+    try {
+      const { execSync } = require('child_process');
+      const fs = require('fs');
+      const os = require('os');
+      const path = require('path');
+
+      if (videoBuffer) {
+        const tmpDir = os.tmpdir();
+        const inputPath = path.join(tmpDir, `${analysis.id}-input.mp4`);
+        const slowPath = path.join(tmpDir, `${analysis.id}-slow.mp4`);
+        const annotatedPath = path.join(tmpDir, `${analysis.id}-annotated.mp4`);
+
+        // Write video buffer to temp file
+        fs.writeFileSync(inputPath, videoBuffer);
+
+        // Step 1: Slow motion (4x slower = 25% speed)
+        execSync(`ffmpeg -i ${inputPath} -vf "setpts=4*PTS" -r 24 -y ${slowPath}`, { timeout: 30000 });
+
+        // Step 2: Add text annotations from AI analysis
+        const tip1 = (aiResult.improvements[0] || '').substring(0, 50).replace(/['"\\:]/g, '');
+        const tip2 = (aiResult.improvements[1] || '').substring(0, 50).replace(/['"\\:]/g, '');
+        const strength1 = (aiResult.strengths[0] || '').substring(0, 40).replace(/['"\\:]/g, '');
+
+        const filterComplex = [
+          `drawtext=text='+ ${strength1}':x=20:y=20:fontsize=16:fontcolor=lime:box=1:boxcolor=black@0.6:boxborderw=4`,
+          `drawtext=text='> ${tip1}':x=20:y=H-80:fontsize=16:fontcolor=yellow:box=1:boxcolor=black@0.6:boxborderw=4`,
+          `drawtext=text='> ${tip2}':x=20:y=H-50:fontsize=14:fontcolor=orange:box=1:boxcolor=black@0.6:boxborderw=4`,
+        ].join(',');
+
+        execSync(`ffmpeg -i ${slowPath} -vf "${filterComplex}" -c:v libx264 -preset fast -y ${annotatedPath}`, { timeout: 30000 });
+
+        // Upload annotated video to Supabase Storage
+        const annotatedBuffer = fs.readFileSync(annotatedPath);
+        const annotatedStoragePath = `${user.id}/${analysis.id}-annotated.mp4`;
+        await serviceClient.storage.from('swing-videos').upload(annotatedStoragePath, annotatedBuffer, {
+          contentType: 'video/mp4',
+          upsert: true,
+        });
+
+        // Get signed URL valid for 7 days
+        const { data: signedData } = await serviceClient.storage
+          .from('swing-videos')
+          .createSignedUrl(annotatedStoragePath, 7 * 24 * 3600);
+
+        if (signedData?.signedUrl) {
+          resultVideoUrl = signedData.signedUrl;
+          await serviceClient
+            .from('swing_analyses')
+            .update({ result_video_url: resultVideoUrl })
+            .eq('id', analysis.id);
+        }
+
+        // Cleanup temp files
+        [inputPath, slowPath, annotatedPath].forEach(f => { try { fs.unlinkSync(f); } catch {} });
+      }
+    } catch (videoErr) {
+      // Non-fatal: text analysis still works even if video annotation fails
+      console.error('Video annotation error:', videoErr);
+    }
+
     return NextResponse.json({
       analysisId: analysis.id,
       status: "completed",
       tokensUsed: tokenCost,
       tokensRemaining: tokenData.balance - tokenCost,
+      ...(resultVideoUrl ? { result_video_url: resultVideoUrl } : {}),
     });
   } catch (err) {
     console.error("Analysis error:", err);
