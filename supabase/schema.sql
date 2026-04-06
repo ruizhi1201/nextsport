@@ -48,8 +48,19 @@ create table swing_analyses (
   recommended_drills jsonb,
   raw_analysis text,
   status text default 'pending', -- pending, processing, completed, failed
+  -- New fields added in pipeline upgrade (April 2026)
+  scores jsonb,                      -- {stance_load, lower_body, swing_path, contact, finish} each 1-5
+  comments_and_annotations jsonb,    -- timed events with narration cues and optional annotations
+  swing_result text,                 -- line_drive | fly_ball | ground_ball | foul | miss
+  training_priorities text,          -- comprehensive multi-week training plan
   created_at timestamptz default now()
 );
+
+-- Migration: Run this if upgrading from pre-April 2026 schema
+-- ALTER TABLE swing_analyses ADD COLUMN IF NOT EXISTS scores JSONB;
+-- ALTER TABLE swing_analyses ADD COLUMN IF NOT EXISTS comments_and_annotations JSONB;
+-- ALTER TABLE swing_analyses ADD COLUMN IF NOT EXISTS swing_result TEXT;
+-- ALTER TABLE swing_analyses ADD COLUMN IF NOT EXISTS training_priorities TEXT;
 
 -- Referrals
 create table referrals (

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createMobileClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
+import { createMobileClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,28 +15,56 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await serviceClient
       .from("swing_analyses")
-      .select("id, status, swing_count, strengths, improvements, recommended_drills, raw_analysis, created_at, tokens_used")
+      .select(
+        "id, status, swing_count, strengths, improvements, recommended_drills, raw_analysis, " +
+        "created_at, tokens_used, result_video_url, " +
+        "scores, comments_and_annotations, swing_result, training_priorities"
+      )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(20);
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      // If the new columns don't exist yet, fall back to the old query
+      if (error.message?.includes("column") || error.message?.includes("schema cache")) {
+        const { data: fallbackData, error: fallbackError } = await serviceClient
+          .from("swing_analyses")
+          .select("id, status, swing_count, strengths, improvements, recommended_drills, raw_analysis, created_at, tokens_used, result_video_url")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(20);
 
-    const analyses = (data || []).map((a: any) => ({
-      ...a,
-      score: null,
-      feedback: a.raw_analysis,
-      audio_url: null,
-      video_url: a.video_url || null,
-      strengths: typeof a.strengths === "string" ? JSON.parse(a.strengths) : (a.strengths || []),
-      improvements: typeof a.improvements === "string" ? JSON.parse(a.improvements) : (a.improvements || []),
-      recommended_drills: typeof a.recommended_drills === "string" ? JSON.parse(a.recommended_drills) : (a.recommended_drills || []),
-    }));
+        if (fallbackError) return NextResponse.json({ error: fallbackError.message }, { status: 500 });
 
+        const analyses = (fallbackData || []).map((a: any) => formatAnalysis(a));
+        return NextResponse.json(analyses);
+      }
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    const analyses = (data || []).map((a: any) => formatAnalysis(a));
     return NextResponse.json(analyses);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-import { createClient } from "@supabase/supabase-js";
+function formatAnalysis(a: any) {
+  return {
+    ...a,
+    score: null,
+    feedback: a.raw_analysis,
+    audio_url: null,
+    video_url: a.result_video_url || null,
+    strengths: typeof a.strengths === "string" ? JSON.parse(a.strengths) : (a.strengths || []),
+    improvements: typeof a.improvements === "string" ? JSON.parse(a.improvements) : (a.improvements || []),
+    recommended_drills:
+      typeof a.recommended_drills === "string"
+        ? JSON.parse(a.recommended_drills)
+        : (a.recommended_drills || []),
+    scores: a.scores || null,
+    comments_and_annotations: a.comments_and_annotations || null,
+    swing_result: a.swing_result || null,
+    training_priorities: a.training_priorities || null,
+  };
+}
