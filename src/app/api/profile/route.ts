@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createMobileClient } from "@/lib/supabase/server";
+import { createMobileClient, createServiceClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
   const supabase = await createMobileClient();
@@ -9,15 +9,35 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { data: profile, error } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .single();
+  const serviceClient = await createServiceClient();
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  // Fetch profile and token balance in parallel
+  const [profileRes, tokenRes] = await Promise.all([
+    serviceClient.from("profiles").select("*").eq("id", user.id).single(),
+    serviceClient.from("token_balances").select("balance").eq("user_id", user.id).single(),
+  ]);
+
+  if (profileRes.error && profileRes.error.code !== "PGRST116") {
+    return NextResponse.json({ error: profileRes.error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ profile, user: { id: user.id, email: user.email } });
+  const profile = profileRes.data ?? {};
+  const tokens_remaining = tokenRes.data?.balance ?? 10;
+
+  // Return a flat profile object the mobile app expects
+  return NextResponse.json({
+    id: user.id,
+    email: user.email,
+    full_name: profile.player_name ?? null,
+    avatar_url: null,
+    tokens_remaining,
+    subscription_status: profile.subscription_status ?? "free",
+    token_reset_date: null,
+    referral_code: profile.referral_code ?? null,
+    // Extra fields
+    age_group: profile.age_group ?? null,
+    level: profile.level ?? null,
+    sport: profile.sport ?? "baseball",
+    onboarding_completed: profile.onboarding_completed ?? false,
+  });
 }
