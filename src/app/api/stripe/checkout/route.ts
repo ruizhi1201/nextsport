@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://nextsport.vercel.app";
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://nextsport-six.vercel.app";
 
     const priceId = process.env.STRIPE_PREMIUM_PRICE_ID!;
 
@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
         },
       ],
       mode: "subscription",
+      allow_promotion_codes: true,
       success_url: `${appUrl}/dashboard?upgraded=true`,
       cancel_url: `${appUrl}/pricing`,
       metadata: { user_id: user.id },
