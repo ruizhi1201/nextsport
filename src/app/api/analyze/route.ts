@@ -857,21 +857,26 @@ export async function POST(request: NextRequest) {
 
         const authHeader = `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
 
-        // Fire-and-forget
-        fetch(lambdaUrlStr, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-amz-date": amzdate,
-            "Authorization": authHeader,
-          },
-          body: lambdaBody,
-        }).then(async (res) => {
-          const body = await res.text().catch(() => "");
-          console.log(`Lambda invoked for ${analysis.id}: HTTP ${res.status} ${body.slice(0,100)}`);
-        }).catch((err: Error) => {
-          console.error("Lambda invoke error:", err);
-        });
+        // Await the Lambda call with a 5s timeout (enough to confirm receipt, not to wait for processing)
+        // Vercel kills fire-and-forget fetches when the function returns — must await
+        try {
+          const lambdaRes = await Promise.race([
+            fetch(lambdaUrlStr, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-amz-date": amzdate,
+                "Authorization": authHeader,
+              },
+              body: lambdaBody,
+            }),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Lambda timeout")), 5000)),
+          ]) as Response;
+          const lambdaResBody = await lambdaRes.text().catch(() => "");
+          console.log(`[Lambda] invoked for ${analysis.id}: HTTP ${lambdaRes.status} ${lambdaResBody.slice(0,100)}`);
+        } catch (lambdaFetchErr: any) {
+          console.error("[Lambda] invoke error:", lambdaFetchErr.message);
+        }
 
         console.log(`Lambda triggered for analysis ${analysis.id}`);
       }
