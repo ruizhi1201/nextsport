@@ -811,43 +811,28 @@ export async function POST(request: NextRequest) {
           }
         };
 
-        // Call Lambda Function URL with AWS SigV4 signing
-        const { SignatureV4 } = await import("@smithy/signature-v4");
-        const { Sha256 } = await import("@aws-crypto/sha256-js");
-        const { HttpRequest } = await import("@smithy/protocol-http");
+        // Use @aws-sdk/client-lambda for signed invocation
+        const { LambdaClient, InvokeCommand } = await import("@aws-sdk/client-lambda");
 
-        const url = new URL(lambdaUrl);
-        const body = JSON.stringify(lambdaPayload);
-
-        const request = new HttpRequest({
-          method: "POST",
-          hostname: url.hostname,
-          path: url.pathname || "/",
-          headers: {
-            "Content-Type": "application/json",
-            "host": url.hostname,
-          },
-          body,
-        });
-
-        const signer = new SignatureV4({
+        const lambdaClient = new LambdaClient({
+          region: process.env.AWS_REGION ?? "us-west-2",
           credentials: {
             accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
             secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
           },
-          region: process.env.AWS_REGION ?? "us-west-2",
-          service: "lambda",
-          sha256: Sha256,
         });
 
-        const signed = await signer.sign(request);
+        // Extract function name from URL for SDK invocation
+        // Lambda Function URL format: https://ID.lambda-url.REGION.on.aws/
+        // We store the full URL — extract the function URL ID and use it
+        const body = JSON.stringify(lambdaPayload);
 
-        // Fire-and-forget — don't await the response
-        fetch(lambdaUrl, {
-          method: "POST",
-          headers: signed.headers as Record<string, string>,
-          body,
-        }).catch((err) => console.error("Lambda invoke error:", err));
+        // Fire-and-forget via InvocationType=Event
+        lambdaClient.send(new InvokeCommand({
+          FunctionName: process.env.NEXTSPORT_LAMBDA_ARN ?? lambdaUrl,
+          InvocationType: "Event",
+          Payload: Buffer.from(body),
+        })).catch((err: Error) => console.error("Lambda invoke error:", err));
 
         console.log(`Lambda triggered for analysis ${analysis.id}`);
       }
