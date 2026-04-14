@@ -727,8 +727,8 @@ export async function POST(request: NextRequest) {
       videoBuffer = Buffer.from(await videoBlob.arrayBuffer());
       aiResult = await analyzeSwingWithAI(videoBuffer, "video/mp4", duration, userProfile);
 
-      // Clean up original video from storage after download
-      await serviceClientForDownload.storage.from("swing-videos").remove([videoPath]);
+      // NOTE: Do NOT delete the video here — Lambda needs to download it.
+      // Lambda is responsible for deleting the input video after processing.
     } catch (aiErr) {
       console.error("AI analysis error:", aiErr);
 
