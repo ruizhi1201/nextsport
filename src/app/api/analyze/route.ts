@@ -823,26 +823,51 @@ export async function POST(request: NextRequest) {
           }
         };
 
-        // Use @aws-sdk/client-lambda for proper SigV4-signed invocation
-        const { LambdaClient, InvokeCommand } = await import("@aws-sdk/client-lambda");
-
-        const lambdaClient = new LambdaClient({
-          region: process.env.AWS_REGION ?? "us-west-2",
-          credentials: {
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-          },
-        });
-
+        // SigV4-sign the Lambda Function URL request using Node.js built-in crypto
+        const crypto = await import("crypto");
         const lambdaBody = JSON.stringify(lambdaPayload);
+        const lambdaUrlStr = lambdaUrl;
+        const lambdaUrlParsed = new URL(lambdaUrlStr);
+        const region = process.env.AWS_REGION ?? "us-west-2";
+        const accessKeyId = process.env.AWS_ACCESS_KEY_ID!;
+        const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY!;
+        const service = "lambda";
 
-        // Fire-and-forget async invocation
-        lambdaClient.send(new InvokeCommand({
-          FunctionName: "sports-ai-vercel-endpoint",
-          InvocationType: "Event",
-          Payload: Buffer.from(lambdaBody),
-        })).then(() => {
-          console.log(`Lambda triggered for analysis ${analysis.id}`);
+        const now = new Date();
+        const amzdate = now.toISOString().replace(/[:\-]/g, "").slice(0, 15) + "Z";
+        const datestamp = amzdate.slice(0, 8);
+
+        const payloadHash = crypto.createHash("sha256").update(lambdaBody).digest("hex");
+        const canonicalHeaders = `content-type:application/json\nhost:${lambdaUrlParsed.hostname}\nx-amz-date:${amzdate}\n`;
+        const signedHeaders = "content-type;host;x-amz-date";
+        const canonicalRequest = ["POST", "/", "", canonicalHeaders, signedHeaders, payloadHash].join("\n");
+
+        const credentialScope = `${datestamp}/${region}/${service}/aws4_request`;
+        const stringToSign = ["AWS4-HMAC-SHA256", amzdate, credentialScope,
+          crypto.createHash("sha256").update(canonicalRequest).digest("hex")].join("\n");
+
+        const hmac = (key: Buffer | string, data: string) =>
+          crypto.createHmac("sha256", key).update(data).digest();
+        const kDate = hmac(`AWS4${secretAccessKey}`, datestamp);
+        const kRegion = hmac(kDate, region);
+        const kService = hmac(kRegion, service);
+        const kSigning = hmac(kService, "aws4_request");
+        const signature = crypto.createHmac("sha256", kSigning).update(stringToSign).digest("hex");
+
+        const authHeader = `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+        // Fire-and-forget
+        fetch(lambdaUrlStr, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-amz-date": amzdate,
+            "Authorization": authHeader,
+          },
+          body: lambdaBody,
+        }).then(async (res) => {
+          const body = await res.text().catch(() => "");
+          console.log(`Lambda invoked for ${analysis.id}: HTTP ${res.status} ${body.slice(0,100)}`);
         }).catch((err: Error) => {
           console.error("Lambda invoke error:", err);
         });
