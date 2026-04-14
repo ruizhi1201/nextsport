@@ -823,41 +823,29 @@ export async function POST(request: NextRequest) {
           }
         };
 
-        // Call Lambda Function URL with AWS SigV4 signing
-        const { SignatureV4 } = await import("@smithy/signature-v4");
-        const { Sha256 } = await import("@aws-crypto/sha256-js");
+        // Use @aws-sdk/client-lambda for proper SigV4-signed invocation
+        const { LambdaClient, InvokeCommand } = await import("@aws-sdk/client-lambda");
 
-        const lambdaBody = JSON.stringify(lambdaPayload);
-        const lambdaUrlParsed = new URL(lambdaUrl);
-
-        const sigv4 = new SignatureV4({
+        const lambdaClient = new LambdaClient({
+          region: process.env.AWS_REGION ?? "us-west-2",
           credentials: {
             accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
             secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
           },
-          region: process.env.AWS_REGION ?? "us-west-2",
-          service: "lambda",
-          sha256: Sha256,
         });
 
-        const signedRequest = await sigv4.sign({
-          method: "POST",
-          hostname: lambdaUrlParsed.hostname,
-          path: lambdaUrlParsed.pathname || "/",
-          protocol: "https:",
-          headers: {
-            "Content-Type": "application/json",
-            "host": lambdaUrlParsed.hostname,
-          },
-          body: lambdaBody,
-        });
+        const lambdaBody = JSON.stringify(lambdaPayload);
 
-        // Fire-and-forget
-        fetch(lambdaUrl, {
-          method: "POST",
-          headers: signedRequest.headers as Record<string, string>,
-          body: lambdaBody,
-        }).catch((err: Error) => console.error("Lambda invoke error:", err));
+        // Fire-and-forget async invocation
+        lambdaClient.send(new InvokeCommand({
+          FunctionName: "sports-ai-vercel-endpoint",
+          InvocationType: "Event",
+          Payload: Buffer.from(lambdaBody),
+        })).then(() => {
+          console.log(`Lambda triggered for analysis ${analysis.id}`);
+        }).catch((err: Error) => {
+          console.error("Lambda invoke error:", err);
+        });
 
         console.log(`Lambda triggered for analysis ${analysis.id}`);
       }
