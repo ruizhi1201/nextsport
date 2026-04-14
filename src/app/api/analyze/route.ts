@@ -811,28 +811,41 @@ export async function POST(request: NextRequest) {
           }
         };
 
-        // Use @aws-sdk/client-lambda for signed invocation
-        const { LambdaClient, InvokeCommand } = await import("@aws-sdk/client-lambda");
+        // Call Lambda Function URL with AWS SigV4 signing
+        const { SignatureV4 } = await import("@smithy/signature-v4");
+        const { Sha256 } = await import("@aws-crypto/sha256-js");
 
-        const lambdaClient = new LambdaClient({
-          region: process.env.AWS_REGION ?? "us-west-2",
+        const lambdaBody = JSON.stringify(lambdaPayload);
+        const lambdaUrlParsed = new URL(lambdaUrl);
+
+        const sigv4 = new SignatureV4({
           credentials: {
             accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
             secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
           },
+          region: process.env.AWS_REGION ?? "us-west-2",
+          service: "lambda",
+          sha256: Sha256,
         });
 
-        // Extract function name from URL for SDK invocation
-        // Lambda Function URL format: https://ID.lambda-url.REGION.on.aws/
-        // We store the full URL — extract the function URL ID and use it
-        const body = JSON.stringify(lambdaPayload);
+        const signedRequest = await sigv4.sign({
+          method: "POST",
+          hostname: lambdaUrlParsed.hostname,
+          path: lambdaUrlParsed.pathname || "/",
+          protocol: "https:",
+          headers: {
+            "Content-Type": "application/json",
+            "host": lambdaUrlParsed.hostname,
+          },
+          body: lambdaBody,
+        });
 
-        // Fire-and-forget via InvocationType=Event
-        lambdaClient.send(new InvokeCommand({
-          FunctionName: process.env.NEXTSPORT_LAMBDA_ARN ?? lambdaUrl,
-          InvocationType: "Event",
-          Payload: Buffer.from(body),
-        })).catch((err: Error) => console.error("Lambda invoke error:", err));
+        // Fire-and-forget
+        fetch(lambdaUrl, {
+          method: "POST",
+          headers: signedRequest.headers as Record<string, string>,
+          body: lambdaBody,
+        }).catch((err: Error) => console.error("Lambda invoke error:", err));
 
         console.log(`Lambda triggered for analysis ${analysis.id}`);
       }
