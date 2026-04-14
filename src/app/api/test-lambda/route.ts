@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     }
 
     const crypto = await import("crypto");
-    const testBody = JSON.stringify({ test: true, analysisId: "test-from-vercel" });
+    const testBody = JSON.stringify({ test: true, analysisId: "test-from-vercel", videoPath: "test/path.mp4", userId: "test-user-123", videoDownloadUrl: null });
     const lambdaUrlParsed = new URL(lambdaUrl);
     const service = "lambda";
 
