@@ -18,7 +18,9 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "stripe": "^20.4.1",
-    "@aws-sdk/client-lambda": "^3.0.0"
+    "@aws-sdk/client-lambda": "^3.0.0",
+    "@smithy/signature-v4": "^3.0.0",
+    "@aws-crypto/sha256-js": "^5.0.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
