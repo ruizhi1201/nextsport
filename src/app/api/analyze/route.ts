@@ -826,6 +826,7 @@ export async function POST(request: NextRequest) {
         // SigV4-sign the Lambda Function URL request using Node.js built-in crypto
         const crypto = await import("crypto");
         const lambdaBody = JSON.stringify(lambdaPayload);
+        console.log(`[Lambda] Sending payload: analysisId=${lambdaPayload.analysisId}, videoPath=${lambdaPayload.videoPath}, videoDownloadUrl=${lambdaPayload.videoDownloadUrl ? "SET" : "null"}, userId=${lambdaPayload.userId}`);
         const lambdaUrlStr = lambdaUrl;
         const lambdaUrlParsed = new URL(lambdaUrlStr);
         const region = process.env.AWS_REGION ?? "us-west-2";
