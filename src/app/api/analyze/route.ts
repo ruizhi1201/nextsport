@@ -788,43 +788,72 @@ export async function POST(request: NextRequest) {
         .eq("id", analysis.id);
     }
 
-    // Generate slow-motion annotated video using ffmpeg + TTS
+    // Trigger Lambda for full analysis + annotated video generation (async)
     let resultVideoUrl: string | null = null;
     try {
-      if (videoBuffer) {
-        const annotatedBuffer = await generateAnnotatedVideo(
-          videoBuffer,
-          analysis.id,
-          aiResult,
-          duration
-        );
+      const lambdaUrl = process.env.NEXTSPORT_LAMBDA_URL;
+      if (lambdaUrl && videoPath) {
+        // Get user profile for the Lambda
+        const { data: profileData } = await serviceClient
+          .from("profiles")
+          .select("age_group, level, sport")
+          .eq("id", user.id)
+          .single();
 
-        if (annotatedBuffer) {
-          const annotatedStoragePath = `${user.id}/${analysis.id}-annotated.mp4`;
-          await serviceClient.storage
-            .from("swing-videos")
-            .upload(annotatedStoragePath, annotatedBuffer, {
-              contentType: "video/mp4",
-              upsert: true,
-            });
-
-          // Get signed URL valid for 7 days
-          const { data: signedData } = await serviceClient.storage
-            .from("swing-videos")
-            .createSignedUrl(annotatedStoragePath, 7 * 24 * 3600);
-
-          if (signedData?.signedUrl) {
-            resultVideoUrl = signedData.signedUrl;
-            await serviceClient
-              .from("swing_analyses")
-              .update({ result_video_url: resultVideoUrl })
-              .eq("id", analysis.id);
+        const lambdaPayload = {
+          analysisId: analysis.id,
+          videoPath: videoPath,
+          userId: user.id,
+          userProfile: {
+            age_group: profileData?.age_group ?? "12-14",
+            level: profileData?.level ?? "intermediate",
+            sport: profileData?.sport ?? "baseball",
           }
-        }
+        };
+
+        // Call Lambda Function URL with AWS SigV4 signing
+        const { SignatureV4 } = await import("@smithy/signature-v4");
+        const { Sha256 } = await import("@aws-crypto/sha256-js");
+        const { HttpRequest } = await import("@smithy/protocol-http");
+
+        const url = new URL(lambdaUrl);
+        const body = JSON.stringify(lambdaPayload);
+
+        const request = new HttpRequest({
+          method: "POST",
+          hostname: url.hostname,
+          path: url.pathname || "/",
+          headers: {
+            "Content-Type": "application/json",
+            "host": url.hostname,
+          },
+          body,
+        });
+
+        const signer = new SignatureV4({
+          credentials: {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+          },
+          region: process.env.AWS_REGION ?? "us-west-2",
+          service: "lambda",
+          sha256: Sha256,
+        });
+
+        const signed = await signer.sign(request);
+
+        // Fire-and-forget — don't await the response
+        fetch(lambdaUrl, {
+          method: "POST",
+          headers: signed.headers as Record<string, string>,
+          body,
+        }).catch((err) => console.error("Lambda invoke error:", err));
+
+        console.log(`Lambda triggered for analysis ${analysis.id}`);
       }
-    } catch (videoErr) {
-      // Non-fatal: text analysis still works even if video annotation fails
-      console.error("Video annotation error:", videoErr);
+    } catch (lambdaErr) {
+      // Non-fatal
+      console.error("Lambda trigger error:", lambdaErr);
     }
 
     return NextResponse.json({
