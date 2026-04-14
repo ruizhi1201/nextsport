@@ -800,9 +800,21 @@ export async function POST(request: NextRequest) {
           .eq("id", user.id)
           .single();
 
+        // Generate a signed URL for Lambda to download the video (1 hour expiry)
+        let videoDownloadUrl: string | null = null;
+        try {
+          const { data: signedDownload } = await serviceClient.storage
+            .from("swing-videos")
+            .createSignedUrl(videoPath, 3600);
+          videoDownloadUrl = signedDownload?.signedUrl ?? null;
+        } catch (signErr) {
+          console.error("Failed to generate signed download URL:", signErr);
+        }
+
         const lambdaPayload = {
           analysisId: analysis.id,
           videoPath: videoPath,
+          videoDownloadUrl: videoDownloadUrl,  // Lambda uses this to download
           userId: user.id,
           userProfile: {
             age_group: profileData?.age_group ?? "12-14",
