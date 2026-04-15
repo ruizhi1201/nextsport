@@ -32,7 +32,7 @@ BEFORE performing any mechanical analysis or generating any output, you MUST:
 1. Identify and isolate ALL complete swings in the video.
    A "complete swing" must include: Stance/Ready → Load → Stride/Toe-touch → Launch → Contact or committed miss → Extension → Finish
 2. IGNORE: half-swings, check swings, warm-up motions, practice wiggles, rehearsal swings, pre-swing movements, any incomplete swing.
-3. Only analyze true, complete swings.
+3. Only analyze true, complete swings. **Analyze a maximum of 3 swings** — if more are detected, select the 3 best (clearest mechanics, most complete). Do not analyze more than 3 swings.
 4. If multiple complete swings appear: analyze each individually, derive assessment from consistent patterns.
 
 ===========================================================
