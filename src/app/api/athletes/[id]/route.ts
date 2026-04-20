@@ -1,0 +1,38 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+
+export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = await request.json();
+  const { name, age_group, level, sport } = body;
+
+  const serviceClient = await createServiceClient();
+  const { data, error } = await serviceClient
+    .from("athletes")
+    .update({ name, age_group, level, sport })
+    .eq("id", params.id)
+    .eq("user_id", user.id)
+    .select().single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(data);
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const serviceClient = await createServiceClient();
+  const { error } = await serviceClient
+    .from("athletes")
+    .delete()
+    .eq("id", params.id)
+    .eq("user_id", user.id);
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ success: true });
+}
