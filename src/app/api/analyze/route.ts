@@ -631,6 +631,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const videoPath = body.videoPath as string | undefined;
     const duration = body.duration ? parseInt(body.duration) : 15;
+    const athleteId = body.athleteId as string | undefined;
 
     if (!videoPath) {
       return NextResponse.json({ error: "No video provided" }, { status: 400 });
@@ -676,23 +677,39 @@ export async function POST(request: NextRequest) {
       description: `Swing analysis (${duration}s video)`,
     });
 
-    // Fetch user profile for AI context
+    // Fetch profile for AI context — use athlete profile if athleteId provided, else user profile
     let userProfile: UserProfile = { age_group: "12-14", level: "intermediate", sport: "baseball" };
     try {
-      const { data: profileData } = await serviceClient
-        .from("profiles")
-        .select("age_group, level, sport")
-        .eq("id", user.id)
-        .single();
-      if (profileData) {
-        userProfile = {
-          age_group: profileData.age_group || "12-14",
-          level: profileData.level || "intermediate",
-          sport: profileData.sport || "baseball",
-        };
+      if (athleteId) {
+        const { data: athleteData } = await serviceClient
+          .from("athletes")
+          .select("age_group, level, sport")
+          .eq("id", athleteId)
+          .eq("user_id", user.id)
+          .single();
+        if (athleteData) {
+          userProfile = {
+            age_group: athleteData.age_group || "12-14",
+            level: athleteData.level || "intermediate",
+            sport: athleteData.sport || "baseball",
+          };
+        }
+      } else {
+        const { data: profileData } = await serviceClient
+          .from("profiles")
+          .select("age_group, level, sport")
+          .eq("id", user.id)
+          .single();
+        if (profileData) {
+          userProfile = {
+            age_group: profileData.age_group || "12-14",
+            level: profileData.level || "intermediate",
+            sport: profileData.sport || "baseball",
+          };
+        }
       }
     } catch {
-      // Use defaults if profile fetch fails
+      // Use defaults
     }
 
     // Also check body for profile overrides
@@ -709,6 +726,7 @@ export async function POST(request: NextRequest) {
         tokens_used: tokenCost,
         status: "processing",
         video_hash: videoHash,
+        ...(athleteId ? { athlete_id: athleteId } : {}),
       })
       .select()
       .single();
