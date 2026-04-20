@@ -364,18 +364,24 @@ async function analyzeSwingWithAI(
 async function analyzeSwingTextOnly(
   durationSeconds: number,
   videoType: string = "video/mp4",
-  userProfile: UserProfile = { age_group: "12-14", level: "intermediate", sport: "baseball" }
+  userProfile: UserProfile & { analysis_history?: any[] } = { age_group: "12-14", level: "intermediate", sport: "baseball" }
 ): Promise<SwingAnalysisResult> {
   const isSlowMo = durationSeconds > 20;
   const estimatedSwings = Math.max(1, Math.floor(durationSeconds / 8));
   const videoFormat = videoType.includes("quicktime") ? "iPhone slow-motion capture" : "standard video";
+
+  const historySection = (userProfile as any).analysis_history?.length > 0
+    ? `\n\nRecent analysis history (last ${(userProfile as any).analysis_history.length} sessions within 7 days):
+${JSON.stringify((userProfile as any).analysis_history, null, 2)}
+Use this history to identify persistent patterns vs new issues. Reference specific past findings where relevant.`
+    : "";
 
   const userPrompt = `Follow exactly the instructions in the system message to analyze this baseball swing video and provide an assessment.
 
 User profile:
 - age_group: ${userProfile.age_group}
 - level: ${userProfile.level}
-- sport: ${userProfile.sport}
+- sport: ${userProfile.sport}${historySection}
 
 Video details:
 - Duration: ${durationSeconds} seconds (${videoFormat})
@@ -702,6 +708,7 @@ export async function POST(request: NextRequest) {
         duration_seconds: duration,
         tokens_used: tokenCost,
         status: "processing",
+        video_hash: videoHash,
       })
       .select()
       .single();
@@ -725,6 +732,76 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Could not load video" }, { status: 400 });
       }
       videoBuffer = Buffer.from(await videoBlob.arrayBuffer());
+
+      // Compute video hash for duplicate detection
+      const crypto = await import("crypto");
+      const videoHash = crypto.createHash("sha256").update(videoBuffer).digest("hex");
+
+      // Check if this exact video was already analyzed by this user
+      const { data: existingAnalysis } = await serviceClient
+        .from("swing_analyses")
+        .select("id, status, strengths, improvements, recommended_drills, raw_analysis, scores, comments_and_annotations, swing_result, training_priorities, result_video_url, created_at")
+        .eq("user_id", user.id)
+        .eq("video_hash", videoHash)
+        .eq("status", "completed")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single()
+        .catch(() => ({ data: null }));
+
+      if (existingAnalysis) {
+        console.log(`[Cache] Duplicate video detected for user ${user.id}, returning cached analysis ${existingAnalysis.id}`);
+        // Refund tokens — no new analysis needed
+        await serviceClient.from("token_balances")
+          .update({ balance: tokenData.balance, updated_at: new Date().toISOString() })
+          .eq("user_id", user.id);
+        await serviceClient.from("token_transactions").insert({
+          user_id: user.id, amount: tokenCost, type: "analysis",
+          description: "Refund — duplicate video, returning cached result",
+        });
+        // Delete the duplicate upload from storage
+        await serviceClientForDownload.storage.from("swing-videos").remove([videoPath]);
+        return NextResponse.json({
+          analysisId: existingAnalysis.id,
+          status: "completed",
+          tokensUsed: 0,
+          tokensRemaining: tokenData.balance,
+          cached: true,
+          scores: existingAnalysis.scores,
+          comments_and_annotations: existingAnalysis.comments_and_annotations,
+          swing_result: existingAnalysis.swing_result,
+          training_priorities: existingAnalysis.training_priorities,
+          areas_to_improve: [],
+          strengths: typeof existingAnalysis.strengths === "string" ? JSON.parse(existingAnalysis.strengths) : (existingAnalysis.strengths || []),
+          improvements: typeof existingAnalysis.improvements === "string" ? JSON.parse(existingAnalysis.improvements) : (existingAnalysis.improvements || []),
+          result_video_url: existingAnalysis.result_video_url,
+        });
+      }
+
+      // Fetch recent analysis history for LLM context (last 5, within 7 days)
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+      const { data: recentHistory } = await serviceClient
+        .from("swing_analyses")
+        .select("id, strengths, improvements, swing_result, created_at")
+        .eq("user_id", user.id)
+        .eq("status", "completed")
+        .gte("created_at", sevenDaysAgo)
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      const analysisHistory = (recentHistory || []).map((h) => ({
+        analysisId: h.id,
+        timestamp: h.created_at,
+        swing_result: h.swing_result,
+        strengths: typeof h.strengths === "string" ? JSON.parse(h.strengths).slice(0, 2) : (h.strengths || []).slice(0, 2),
+        improvements: typeof h.improvements === "string" ? JSON.parse(h.improvements).slice(0, 2) : (h.improvements || []).slice(0, 2),
+      }));
+
+      // Pass history to AI analysis
+      if (analysisHistory.length > 0) {
+        (userProfile as any).analysis_history = analysisHistory;
+      }
+
       aiResult = await analyzeSwingWithAI(videoBuffer, "video/mp4", duration, userProfile);
 
       // NOTE: Do NOT delete the video here — Lambda needs to download it.
@@ -757,6 +834,7 @@ export async function POST(request: NextRequest) {
     const baseUpdate: Record<string, any> = {
       status: "completed",
       swing_count: aiResult.swing_count,
+      video_hash: videoHash,
       strengths: JSON.stringify(aiResult.strengths),
       improvements: JSON.stringify(aiResult.improvements),
       recommended_drills: JSON.stringify(aiResult.recommended_drills),
