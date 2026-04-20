@@ -13,16 +13,23 @@ export async function GET(request: NextRequest) {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    const { data, error } = await serviceClient
+    const athleteId = request.nextUrl.searchParams.get("athlete_id");
+    let query = serviceClient
       .from("swing_analyses")
       .select(
         "id, status, swing_count, strengths, improvements, recommended_drills, raw_analysis, " +
-        "created_at, tokens_used, result_video_url, " +
+        "created_at, tokens_used, result_video_url, athlete_id, " +
         "scores, comments_and_annotations, swing_result, training_priorities"
       )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(20);
+
+    if (athleteId) {
+      query = query.eq("athlete_id", athleteId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       // If the new columns don't exist yet, fall back to the old query
