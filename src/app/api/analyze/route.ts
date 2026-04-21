@@ -725,7 +725,6 @@ export async function POST(request: NextRequest) {
         duration_seconds: duration,
         tokens_used: tokenCost,
         status: "processing",
-        video_hash: videoHash,
         ...(athleteId ? { athlete_id: athleteId } : {}),
       })
       .select()
