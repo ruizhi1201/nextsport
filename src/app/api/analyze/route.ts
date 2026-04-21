@@ -737,6 +737,7 @@ export async function POST(request: NextRequest) {
     // Run AI analysis
     let aiResult: SwingAnalysisResult;
     let videoBuffer: Buffer | null = null;
+    let videoHash: string | null = null;
     try {
       const serviceClientForDownload = createClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -752,7 +753,7 @@ export async function POST(request: NextRequest) {
 
       // Compute video hash for duplicate detection
       const crypto = await import("crypto");
-      const videoHash = crypto.createHash("sha256").update(videoBuffer).digest("hex");
+      videoHash = crypto.createHash("sha256").update(videoBuffer).digest("hex");
 
       // Check if this exact video was already analyzed by this user
       let existingAnalysis: any = null;
@@ -862,7 +863,7 @@ export async function POST(request: NextRequest) {
     const baseUpdate: Record<string, any> = {
       status: "completed",
       swing_count: aiResult.swing_count,
-      video_hash: videoHash,
+      ...(videoHash ? { video_hash: videoHash } : {}),
       strengths: JSON.stringify(aiResult.strengths),
       improvements: JSON.stringify(aiResult.improvements),
       recommended_drills: JSON.stringify(aiResult.recommended_drills),
