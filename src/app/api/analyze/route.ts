@@ -755,16 +755,21 @@ export async function POST(request: NextRequest) {
       const videoHash = crypto.createHash("sha256").update(videoBuffer).digest("hex");
 
       // Check if this exact video was already analyzed by this user
-      const { data: existingAnalysis } = await serviceClient
-        .from("swing_analyses")
-        .select("id, status, strengths, improvements, recommended_drills, raw_analysis, scores, comments_and_annotations, swing_result, training_priorities, result_video_url, created_at")
-        .eq("user_id", user.id)
-        .eq("video_hash", videoHash)
-        .eq("status", "completed")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single()
-        .catch(() => ({ data: null }));
+      let existingAnalysis: any = null;
+      try {
+        const { data: _existing } = await serviceClient
+          .from("swing_analyses")
+          .select("id, status, strengths, improvements, recommended_drills, raw_analysis, scores, comments_and_annotations, swing_result, training_priorities, result_video_url, created_at")
+          .eq("user_id", user.id)
+          .eq("video_hash", videoHash)
+          .eq("status", "completed")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        existingAnalysis = _existing;
+      } catch {
+        existingAnalysis = null;
+      }
 
       if (existingAnalysis) {
         console.log(`[Cache] Duplicate video detected for user ${user.id}, returning cached analysis ${existingAnalysis.id}`);
@@ -797,14 +802,20 @@ export async function POST(request: NextRequest) {
 
       // Fetch recent analysis history for LLM context (last 5, within 7 days)
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-      const { data: recentHistory } = await serviceClient
-        .from("swing_analyses")
-        .select("id, strengths, improvements, swing_result, created_at")
-        .eq("user_id", user.id)
-        .eq("status", "completed")
-        .gte("created_at", sevenDaysAgo)
-        .order("created_at", { ascending: false })
-        .limit(5);
+      let recentHistory: any[] = [];
+      try {
+        const { data: _history } = await serviceClient
+          .from("swing_analyses")
+          .select("id, strengths, improvements, swing_result, created_at")
+          .eq("user_id", user.id)
+          .eq("status", "completed")
+          .gte("created_at", sevenDaysAgo)
+          .order("created_at", { ascending: false })
+          .limit(5);
+        recentHistory = _history || [];
+      } catch {
+        recentHistory = [];
+      }
 
       const analysisHistory = (recentHistory || []).map((h) => ({
         analysisId: h.id,
